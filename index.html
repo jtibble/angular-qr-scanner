@@ -1,6 +1,6 @@
 <html ng-app="App">
   <body ng-controller="qrCrtl">
-    <qr-scanner width="400" height="300" ng-success="onSuccess(data)" ng-error="onError(error)" />
+    <qr-scanner ng-scan-frequency="500" ng-success="onSuccess(data)" ng-error="onError(error)" />
 
     <script src="http://ajax.googleapis.com/ajax/libs/angularjs/1.2.14/angular.js"></script>
     <script src="src/jsqrcode/src/grid.js"></script>
@@ -36,71 +36,112 @@ App.controller('qrCrtl', ['$scope', function($scope) {
   };
 }]);
 
-App.directive('qrScanner', ['$timeout', function($timeout) {
-  return {
-    restrict: 'E',
-    scope: {
-      ngSuccess: '&ngSuccess',
-      ngError: '&ngError',
-      ngVideoError: '&ngVideoError'
-    },
-    link: function(scope, element, attrs) {
-    
-      window.URL = window.URL || window.webkitURL || window.mozURL || window.msURL;
-      navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-    
-      var height = attrs.height || 300;
-      var width = attrs.width || 250;
-      var localMediaStream;
-    
-      var video = document.createElement('video');
-      video.setAttribute('width', width);
-      video.setAttribute('height', height);
-      var canvas = document.createElement('canvas');
-      canvas.setAttribute('id', 'qr-canvas');
-      canvas.setAttribute('width', width);
-      canvas.setAttribute('height', height);
-      canvas.setAttribute('style', 'display:none;'); 
-    
-      angular.element(element).append(video);
-      angular.element(element).append(canvas);
-      var context = canvas.getContext('2d'); 
-    
-      var scan = function() {
-        if (localMediaStream) {
-          context.drawImage(video, 0, 0, 307,250);
-          try {
-            qrcode.decode();
-          } catch(e) {
-            scope.ngError({error: e});
-          }
+App.directive('qrScanner', ['$timeout', '$interval', function($timeout, $interval) {
+    return {
+        restrict: 'E',
+        scope: {
+            ngSuccess: '&ngSuccess',
+            ngError: '&ngError',
+            ngVideoError: '&ngVideoError',
+            ngScanFrequency: '@ngScanFrequency'
+        },
+        link: function(scope, element, attrs) {
+            
+            window.URL = window.URL || window.webkitURL || window.mozURL || window.msURL;
+
+            navigator.getUserMedia = navigator.getUserMedia || 
+                                    navigator.webkitGetUserMedia || 
+                                    navigator.mozGetUserMedia || 
+                                    navigator.msGetUserMedia;
+
+            var localMediaStream, video, canvas;
+
+            var scan = function() {
+                if (localMediaStream) {
+                    var context = canvas.getContext('2d'); 
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    try {
+                        qrcode.decode();
+                    } catch(e) {
+                        scope.ngError({error: e});
+                    }
+                }
+                $timeout(scan, scope.ngScanFrequency);
+            }
+
+            var successCallback = function(stream) {
+                
+                video = document.createElement('video');
+                video.autoplay = true;
+
+                canvas = document.createElement('canvas');
+                canvas.setAttribute('id', 'qr-canvas');
+                canvas.setAttribute('style', 'display:none');
+
+                // Fetch the video preliminarily to get the size and aspect ratio
+                video.src = (window.URL && window.URL.createObjectURL(stream)) || stream;
+
+                var stopImagePolling;
+
+                var checkVideoSource = function(){
+                    
+                    // It is possible that the video has not been intialized, so abort if it's not ready yet
+                    if( video.videoWidth == 0 || video.videoHeight == 0) 
+                        return;
+
+                    // If loading the source video was successful, cancel the polling
+                    $interval.cancel(stopImagePolling);
+                    
+                    // Handle vertical videos from smartphone and other handheld devices
+                    if( video.videoWidth > video.videoHeight ){
+                        var aspectRatio = video.videoWidth / video.videoHeight;
+                        var videoMaxWidth = 300;
+
+                        var videoWidth = Math.min(video.videoWidth, videoMaxWidth);
+
+                        video.setAttribute('width', videoWidth);
+                        video.setAttribute('height', videoWidth/aspectRatio);
+                        canvas.width = videoWidth;
+                        canvas.height = videoWidth/aspectRatio;
+                    } else {
+                        var aspectRatio = video.videoWidth / video.videoHeight;
+                        var videoMaxHeight = 300;
+
+                        var videoHeight = Math.min(video.videoHeight, videoMaxHeight);
+
+                        video.setAttribute('height', videoHeight);
+                        video.setAttribute('width', videoHeight * aspectRatio);
+                        canvas.height = videoHeight;
+                        canvas.width = videoHeight * aspectRatio;
+                    }
+
+                    angular.element(element).append(video);
+                    angular.element(element).append(canvas);
+
+                    localMediaStream = stream;
+                    video.play();
+                    scan();
+                }
+
+                stopImagePolling = $interval( checkVideoSource, 500);
+            }
+
+            // Call the getUserMedia method with our callback functions
+            if (navigator.getUserMedia) {
+                navigator.getUserMedia({video: true}, successCallback, function(e) {
+                    scope.ngVideoError({error: e});
+                });
+            } else {
+                scope.ngVideoError({error: 'Native web camera streaming (getUserMedia) not supported in this browser.'});
+            }
+            
+            qrcode.callback = function(data) {
+            scope.ngSuccess({data: data});
+        };
+
         }
-        $timeout(scan, 500);
-      }
-
-      var successCallback = function(stream) {
-        video.src = (window.URL && window.URL.createObjectURL(stream)) || stream;
-        localMediaStream = stream;
-
-        video.play();
-        $timeout(scan, 1000);
-      }
-
-      // Call the getUserMedia method with our callback functions
-      if (navigator.getUserMedia) {
-        navigator.getUserMedia({video: true}, successCallback, function(e) {
-          scope.ngVideoError({error: e});
-        });
-      } else {
-        scope.ngVideoError({error: 'Native web camera streaming (getUserMedia) not supported in this browser.'});
-      }
-
-      qrcode.callback = function(data) {
-        scope.ngSuccess({data: data});
-      };
     }
-  }
-}]);
+    }]);
     </script>
   </body>
 </html>
